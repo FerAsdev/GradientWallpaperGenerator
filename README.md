@@ -11,9 +11,17 @@ App client-side para crear wallpapers de gradientes en ultra alta calidad. Inclu
 
 ## Uso
 
-1. Abre `index.html` en tu navegador.
+1. Abre `index.html` en tu navegador o sirve el proyecto con un servidor local (recomendado).
 2. Ajusta el tipo de gradiente, stops y resolución.
 3. Haz clic en **Renderizar canvas** y luego en **Exportar PNG**.
+
+Si tu navegador bloquea recursos al usar `file://`, usa un servidor local:
+
+```
+python -m http.server 8000
+```
+
+Luego visita `http://localhost:8000`.
 
 ## Estructura del proyecto
 
