@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Generador de Gradientes → PNG</title>
+  <style>
+    :root { --gap: 12px; --bg:#0b0b0f; --panel:#141420; --border:#2a2a3b; --text:#e8e8f0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid; grid-template-columns: 360px 1fr; min-height: 100vh;
+    }
+    aside { padding: 16px; border-right: 1px solid var(--border); background: var(--panel); }
+    main  { padding: 16px; display: grid; grid-template-rows: 1fr auto; gap: var(--gap); }
+    h1 { font-size: 16px; margin: 0 0 10px; }
+    fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 0 0 var(--gap); }
+    legend { padding: 0 6px; opacity: 0.9; }
+    label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; margin: 6px 0; }
+    input[type="number"] { width: 90px; }
+    input[type="range"] { width: 160px; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+    .row input[type="color"] { width: 40px; height: 28px; padding: 0; border: none; background: transparent; }
+    .stops { margin-top: 8px; }
+    button, select, input, textarea {
+      background: #1b1b2b; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    }
+    button { cursor: pointer; }
+    .btn-small { padding: 4px 8px; font-size: 12px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .preview-wrap {
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: #000;
+      display: grid; grid-template-rows: 1fr auto; min-height: 60vh;
+    }
+    #preview {
+      min-height: 300px;
+      background: #000; /* se sobrescribe en JS para vista rápida */
+    }
+    .meta { padding: 10px; border-top: 1px solid var(--border); display: flex; gap: 16px; flex-wrap: wrap; }
+    .meta div { opacity: 0.8; }
+    canvas { display: none; }
+    .muted { opacity: .7; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>Generador de Gradientes → PNG</h1>
+
+    <fieldset>
+      <legend>Tipo y Ángulo</legend>
+      <label>
+        Tipo
+        <select id="type">
+          <option value="linear" selected>Lineal</option>
+          <option value="radial">Radial</option>
+        </select>
+      </label>
+      <div id="angleRow">
+        <label>
+          Ángulo (°)
+          <input id="angle" type="number" min="0" max="360" value="125" />
+        </label>
+        <label>
+          <span class="muted">Arrastra</span>
+          <input id="angleRange" type="range" min="0" max="360" value="125" />
+        </label>
+      </div>
+      <div id="radialOpts" style="display:none">
+        <label>
+          Radio (% del lado menor)
+          <input id="radius" type="number" min="10" max="200" value="100" />
+        </label>
+        <label>
+          Centro X (%)
+          <input id="cx" type="number" min="0" max="100" value="50" />
+        </label>
+        <label>
+          Centro Y (%)
+          <input id="cy" type="number" min="0" max="100" value="50" />
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Color Stops</legend>
+      <div class="actions">
+        <button id="addStop" type="button">Añadir stop</button>
+        <button id="sortStops" type="button" title="Ordenar por posición">Ordenar</button>
+        <button id="resetStops" type="button">Reiniciar</button>
+      </div>
+      <div id="stops" class="stops"></div>
+      <div class="muted">Cada stop: color + posición 0–100. Al menos 2.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Resolución de Salida</legend>
+      <label>Width px <input id="w" type="number" value="3440" min="16" /></label>
+      <label>Height px <input id="h" type="number" value="1440" min="16" /></label>
+      <div class="actions">
+        <button id="useScreen" type="button">Usar tamaño pantalla</button>
+        <button id="use4k" type="button">4K (3840×2160)</button>
+        <button id="use1080" type="button">1080p (1920×1080)</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Exportar</legend>
+      <div class="actions">
+        <button id="render" type="button">Render a Canvas</button>
+        <button id="download" type="button">Descargar PNG</button>
+      </div>
+      <div class="muted">El preview es CSS; el PNG sale del canvas a la resolución indicada.</div>
+    </fieldset>
+  </aside>
+
+  <main>
+    <div class="preview-wrap">
+      <div id="preview"></div>
+      <div class="meta">
+        <div id="cssSnippet" class="muted"></div>
+        <div id="info" class="muted"></div>
+      </div>
+    </div>
+    <div class="muted">Consejo: ajusta, dale “Render a Canvas” y luego “Descargar PNG”.</div>
+    <canvas id="canvas"></canvas>
+  </main>
+
+  <script>
+    // ---- referencias
+    const els = {
+      type: document.getElementById('type'),
+      angle: document.getElementById('angle'),
+      angleRange: document.getElementById('angleRange'),
+      angleRow: document.getElementById('angleRow'),
+      radialOpts: document.getElementById('radialOpts'),
+      radius: document.getElementById('radius'),
+      cx: document.getElementById('cx'),
+      cy: document.getElementById('cy'),
+      stopsWrap: document.getElementById('stops'),
+      addStop: document.getElementById('addStop'),
+      sortStops: document.getElementById('sortStops'),
+      resetStops: document.getElementById('resetStops'),
+      w: document.getElementById('w'),
+      h: document.getElementById('h'),
+      useScreen: document.getElementById('useScreen'),
+      use4k: document.getElementById('use4k'),
+      use1080: document.getElementById('use1080'),
+      preview: document.getElementById('preview'),
+      renderBtn: document.getElementById('render'),
+      dlBtn: document.getElementById('download'),
+      canvas: document.getElementById('canvas'),
+      cssSnippet: document.getElementById('cssSnippet'),
+      info: document.getElementById('info'),
+    };
+
+    // ---- estado simple
+    let stops = [
+      { color: '#27044d', pos: 19 },
+      { color: '#000000', pos: 100 },
+    ];
+
+    // ---- util: crea fila de stop
+    function stopRow(stop, index) {
+      const div = document.createElement('div');
+      div.className = 'row';
+      div.dataset.index = index;
+      div.innerHTML = `
+        <input type="color" value="${stop.color}">
+        <input type="number" min="0" max="100" value="${stop.pos}" style="width:72px" title="Posición 0-100">
+        <button class="btn-small up" title="Subir">↑</button>
+        <button class="btn-small down" title="Bajar">↓</button>
+        <button class="btn-small del" title="Eliminar">✕</button>
+      `;
+      return div;
+    }
+
+    function renderStopsUI() {
+      els.stopsWrap.innerHTML = '';
+      stops.forEach((s, i) => els.stopsWrap.appendChild(stopRow(s, i)));
+      updatePreview();
+    }
+
+    // ---- listeners de las filas (delegación)
+    els.stopsWrap.addEventListener('input', (e) => {
+      const row = e.target.closest('.row'); if (!row) return;
+      const idx = +row.dataset.index;
+      if (e.target.type === 'color') stops[idx].color = e.target.value;
+      if (e.target.type === 'number') {
+        let v = parseFloat(e.target.value);
+        if (isNaN(v)) v = 0;
+        v = Math.min(100, Math.max(0, v));
+        stops[idx].pos = v;
+        e.target.value = v;
+      }
+      updatePreview();
+    });
+
+    els.stopsWrap.addEventListener('click', (e) => {
+      const row = e.target.closest('.row'); if (!row) return;
+      const idx = +row.dataset.index;
+
+      if (e.target.classList.contains('del')) {
+        if (stops.length <= 2) return; // crítico: mantener mínimo 2
+        stops.splice(idx, 1);
+        renderStopsUI();
+      }
+      if (e.target.classList.contains('up') && idx > 0) {
+        [stops[idx-1], stops[idx]] = [stops[idx], stops[idx-1]];
+        renderStopsUI();
+      }
+      if (e.target.classList.contains('down') && idx < stops.length - 1) {
+        [stops[idx+1], stops[idx]] = [stops[idx], stops[idx+1]];
+        renderStopsUI();
+      }
+    });
+
+    // ---- botones de stops
+    els.addStop.addEventListener('click', () => {
+      // añade stop intermedio aproximado
+      const last = stops[stops.length - 1];
+      const prev = stops[stops.length - 2] || { pos: 0, color: '#ffffff' };
+      const pos = Math.round((prev.pos + last.pos) / 2);
+      stops.splice(stops.length - 1, 0, { color: '#9b59b6', pos });
+      renderStopsUI();
+    });
+
+    els.sortStops.addEventListener('click', () => {
+      stops.sort((a, b) => a.pos - b.pos);
+      renderStopsUI();
+    });
+
+    els.resetStops.addEventListener('click', () => {
+      stops = [
+        { color: '#27044d', pos: 19 },
+        { color: '#000000', pos: 100 },
+      ];
+      renderStopsUI();
+    });
+
+    // ---- tipo y ángulo
+    function toggleTypeUI() {
+      const isLinear = els.type.value === 'linear';
+      els.angleRow.style.display = isLinear ? '' : 'none';
+      els.radialOpts.style.display = isLinear ? 'none' : '';
+    }
+    els.type.addEventListener('change', () => { toggleTypeUI(); updatePreview(); });
+
+    // sincroniza number y range
+    els.angle.addEventListener('input', () => { els.angleRange.value = els.angle.value; updatePreview(); });
+    els.angleRange.addEventListener('input', () => { els.angle.value = els.angleRange.value; updatePreview(); });
+
+    // radial inputs
+    [els.radius, els.cx, els.cy].forEach(i => i.addEventListener('input', updatePreview));
+
+    // ---- resolución
+    els.useScreen.addEventListener('click', () => {
+      els.w.value = window.screen.width;
+      els.h.value = window.screen.height;
+    });
+    els.use4k.addEventListener('click', () => { els.w.value = 3840; els.h.value = 2160; });
+    els.use1080.addEventListener('click', () => { els.w.value = 1920; els.h.value = 1080; });
+
+    // ---- genera CSS para el preview
+    function toCSSGradient() {
+      const list = stops
+        .slice()
+        .sort((a,b) => a.pos - b.pos)
+        .map(s => `${s.color} ${s.pos}%`)
+        .join(', ');
+
+      if (els.type.value === 'linear') {
+        const a = parseFloat(els.angle.value) || 0;
+        return `linear-gradient(${a}deg, ${list})`;
+      } else {
+        const cx = parseFloat(els.cx.value) || 50;
+        const cy = parseFloat(els.cy.value) || 50;
+        const r  = parseFloat(els.radius.value) || 100;
+        // radial más común: círculo desde centro custom
+        return `radial-gradient(circle at ${cx}% ${cy}%, ${list})`;
+      }
+    }
+
+    function updatePreview() {
+      const css = toCSSGradient();
+      els.preview.style.background = css;
+      els.cssSnippet.textContent = `background: ${css};`;
+    }
+
+    // ---- renderizado a canvas
+    function drawToCanvas() {
+      // crítico: respetar DPR para nitidez del PNG
+      const w = Math.max(16, parseInt(els.w.value, 10) || 1920);
+      const h = Math.max(16, parseInt(els.h.value, 10) || 1080);
+      const dpr = 1; // Para exportación 1:1. Cambiar a devicePixelRatio si quieres más nitidez.
+      const cw = Math.floor(w * dpr), ch = Math.floor(h * dpr);
+
+      const canvas = els.canvas;
+      canvas.width = cw; canvas.height = ch;
+
+      const ctx = canvas.getContext('2d');
+
+      // lineal: calcular start/end usando el ángulo y la diagonal
+      if (els.type.value === 'linear') {
+        const angleDeg = parseFloat(els.angle.value) || 0;
+        const θ = angleDeg * Math.PI / 180;
+        const cx = cw / 2, cy = ch / 2;
+
+        // vector dirección del ángulo
+        const vx = Math.cos(θ);
+        const vy = Math.sin(θ);
+        const halfDiag = Math.sqrt(cw*cw + ch*ch) / 2;
+
+        const x0 = cx - vx * halfDiag;
+        const y0 = cy - vy * halfDiag;
+        const x1 = cx + vx * halfDiag;
+        const y1 = cy + vy * halfDiag;
+
+        const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+        stops
+          .slice()
+          .sort((a,b)=>a.pos-b.pos)
+          .forEach(s => grad.addColorStop((s.pos/100), s.color));
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, cw, ch);
+      } else {
+        // radial: círculo con centro custom y radio relativo al lado menor
+        const cxPct = (parseFloat(els.cx.value) || 50) / 100;
+        const cyPct = (parseFloat(els.cy.value) || 50) / 100;
+        const rPct  = (parseFloat(els.radius.value) || 100) / 100;
+
+        const cx = cw * cxPct;
+        const cy = ch * cyPct;
+        const minSide = Math.min(cw, ch);
+        const r = (minSide / 2) * rPct;
+
+        // Canvas no tiene radial “CSS-like” con múltiples radios concéntricos,
+        // pero podemos simular con createRadialGradient desde casi 0 hasta r.
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        stops
+          .slice()
+          .sort((a,b)=>a.pos-b.pos)
+          .forEach(s => grad.addColorStop((s.pos/100), s.color));
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, cw, ch);
+      }
+
+      els.info.textContent = `Canvas: ${cw}×${ch}px · DPR export: ${dpr}`;
+    }
+
+    // ---- descarga
+    function downloadPNG() {
+      // crítico: toDataURL sincero a PNG
+      const url = els.canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'gradient.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    // ---- eventos principales
+    els.renderBtn.addEventListener('click', drawToCanvas);
+    els.dlBtn.addEventListener('click', downloadPNG);
+
+    // init
+    toggleTypeUI();
+    renderStopsUI();
+    updatePreview();
+
+    // accesos rápidos
+    document.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'r') { drawToCanvas(); }
+      if (e.key.toLowerCase() === 's') { downloadPNG(); }
+    });
+  </script>
+</body>
+</html>
