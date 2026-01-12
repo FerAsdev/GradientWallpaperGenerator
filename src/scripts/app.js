@@ -179,6 +179,16 @@ function buildCssGradient() {
   return mesh.css;
 }
 
+function farthestCornerRadius(width, height, cx, cy) {
+  const distances = [
+    Math.hypot(cx, cy),
+    Math.hypot(width - cx, cy),
+    Math.hypot(cx, height - cy),
+    Math.hypot(width - cx, height - cy),
+  ];
+  return Math.max(...distances);
+}
+
 function updatePreview() {
   const css = buildCssGradient();
   if (els.gradientType.value === 'mesh') {
@@ -305,13 +315,15 @@ function renderToCanvas() {
   } else if (type === 'radial') {
     const x = (Number(els.centerX.value) || 50) / 100;
     const y = (Number(els.centerY.value) || 45) / 100;
-    const radius = Math.min(canvas.width, canvas.height) * 0.65;
+    const cx = canvas.width * x;
+    const cy = canvas.height * y;
+    const radius = farthestCornerRadius(canvas.width, canvas.height, cx, cy);
     const grad = ctx.createRadialGradient(
-      canvas.width * x,
-      canvas.height * y,
+      cx,
+      cy,
       0,
-      canvas.width * x,
-      canvas.height * y,
+      cx,
+      cy,
       radius
     );
     sortedStops().forEach((stop) => grad.addColorStop(stop.pos / 100, stop.color));
@@ -324,25 +336,64 @@ function renderToCanvas() {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   } else if (type === 'mesh') {
-    ctx.fillStyle = '#05050a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
     const mesh = createMeshLayers();
     const paletteStops = sortedStops();
-    paletteStops.forEach((stop, index) => {
-      const offset = (index + 1) / (paletteStops.length + 1);
-      const x = canvas.width * (0.2 + offset * 0.6);
-      const y = canvas.height * (0.2 + ((index % 2) * 0.4));
-      const radius = Math.min(canvas.width, canvas.height) * 0.6;
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
-      grad.addColorStop(0, stop.color);
-      grad.addColorStop(1, 'transparent');
-      ctx.fillStyle = grad;
-      ctx.globalAlpha = 0.8;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    const centerX = Number(els.centerX.value) || 50;
+    const centerY = Number(els.centerY.value) || 45;
+    const layers = Math.min(6, Math.max(2, Number(els.meshLayers.value) || 3));
+
+    const layerConfigs = Array.from({ length: layers }, (_, i) => {
+      const stop = paletteStops[i % paletteStops.length];
+      const xOffset = (i % 2 === 0 ? -18 : 18) + (i * 4);
+      const yOffset = (i % 2 === 0 ? 12 : -16) + (i * 3);
+      return {
+        color: stop.color,
+        x: centerX + xOffset,
+        y: centerY + yOffset,
+      };
     });
-    ctx.globalAlpha = 1;
+
+    const baseStop = paletteStops[0];
+    const endStop = paletteStops[paletteStops.length - 1];
+
+    const drawRadial = (colorStops, positionX, positionY) => {
+      const cx = (positionX / 100) * canvas.width;
+      const cy = (positionY / 100) * canvas.height;
+      const radius = farthestCornerRadius(canvas.width, canvas.height, cx, cy);
+      const grad = tempCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      colorStops.forEach((stop) => grad.addColorStop(stop.pos, stop.color));
+      tempCtx.fillStyle = grad;
+      tempCtx.fillRect(0, 0, canvas.width, canvas.height);
+    };
+
+    drawRadial(
+      [
+        { pos: 0, color: baseStop.color },
+        { pos: 0.7, color: endStop.color },
+      ],
+      centerX,
+      centerY
+    );
+
+    for (let i = layerConfigs.length - 1; i >= 0; i -= 1) {
+      const layer = layerConfigs[i];
+      drawRadial(
+        [
+          { pos: 0, color: layer.color },
+          { pos: 0.6, color: 'transparent' },
+          { pos: 1, color: 'transparent' },
+        ],
+        layer.x,
+        layer.y
+      );
+    }
+
     ctx.filter = `blur(${mesh.blur}px)`;
-    ctx.drawImage(canvas, 0, 0);
+    ctx.drawImage(tempCanvas, 0, 0);
     ctx.filter = 'none';
   } else {
     ctx.fillStyle = '#111';
